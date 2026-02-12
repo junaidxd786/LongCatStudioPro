@@ -15,7 +15,6 @@ import { Card, CardHeader } from './components/ui/Card';
 import { Input, Textarea } from './components/ui/Input';
 import { Select } from './components/ui/Select';
 import { Badge } from './components/ui/Badge';
-import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 
 // ==================== CONFIGURATION ====================
@@ -59,8 +58,6 @@ export default function App() {
   // State
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_LONGCAT_API_KEY || '');
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
-  const [collapsed, setCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState('create'); // Sidebar tab
 
   // Inputs
   const [topic, setTopic] = useState('');
@@ -80,9 +77,6 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [outputTab, setOutputTab] = useState('script'); // 'script', 'hooks'
-
-  // Refs
-  const outputRef = useRef(null);
 
   // Helpers
   const currentFormat = FORMATS.find(f => f.id === format) || FORMATS[0];
@@ -121,10 +115,12 @@ export default function App() {
 
     try {
       if (type === 'hooks') {
-        const prompt = `Generate 5 viral hooks for "${topic}". Audience: ${targetAudience}. Tone: ${tone}. Return numbered list.`;
+        const prompt = `Generate 5 viral hooks for "${topic}". Audience: ${targetAudience}. Tone: ${tone}. Return a numbered list in PLAIN TEXT. Do not use Markdown (no bold, no italics, no headers).`;
         const content = await callLongCatAPI([{ role: 'user', content: prompt }], selectedModel, 1000);
-        const hookList = content.split(/\n/).filter(line => /^\d/.test(line.trim()));
-        setHooks(hookList.length ? hookList : [content]);
+        // Strip markdown just in case
+        const plainText = content.replace(/[*_#`]/g, '');
+        const hookList = plainText.split(/\n/).filter(line => /^\d/.test(line.trim()));
+        setHooks(hookList.length ? hookList : [plainText]);
         setOutputTab('hooks');
       } else {
         const durationObj = DURATIONS.find(d => d.id === duration);
@@ -137,7 +133,8 @@ export default function App() {
         ${includeTimestamps && !isStory ? '- Timestamps [00:00]' : ''}
         ${includeVisualCues && !isStory ? '- Visual Cues [Scene]' : ''}
         - Natural spoken language.
-        - Strict formatting rules apply.`;
+        - Strict formatting rules apply.
+        - IMPORTANT: Output MUST be PLAIN TEXT only. Do NOT use Markdown formatting (no bold **, no italics *, no headers #). Just plain text.`;
 
         const userPrompt = `Topic: "${topic}"\nAudience: ${targetAudience}\nWrite the script.`;
 
@@ -147,13 +144,16 @@ export default function App() {
           durationObj.tokens
         );
 
-        setScript(content);
-        analyzeScript(content);
+        // Strip Markdown characters from the response to ensure plain text
+        const plainTextScript = content.replace(/[*#`]/g, '');
+
+        setScript(plainTextScript);
+        analyzeScript(plainTextScript);
         setOutputTab('script');
       }
     } catch (err) {
       console.error(err);
-      // Ideally show toast error
+      alert(`Error: ${err.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -170,28 +170,64 @@ export default function App() {
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
-    // Show toast
+    // Ideally show toast
+  };
+
+  const handleSave = () => {
+    if (!script) return;
+    const blob = new Blob([script], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `longcat-script-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRefine = async (action) => {
+    if (!script) return;
+    setIsGenerating(true);
+    let instruction = "";
+    switch (action) {
+      case 'shorten': instruction = "Shorten this text by 20% while keeping key info."; break;
+      case 'expand': instruction = "Expand this text with more detail and depth."; break;
+      case 'simplify': instruction = "Simplify this text for a general audience (Grade 8 reading level)."; break;
+      case 'viral': instruction = "Make this text more engaging, punchy, and viral using emotional triggers."; break;
+      default: instruction = "Refine this text.";
+    }
+
+    try {
+      const prompt = `${instruction}\n\nIMPORTANT: Return PLAIN TEXT only. No Markdown.\n\nText:\n${script}`;
+      const content = await callLongCatAPI([{ role: 'user', content: prompt }], selectedModel, 2000);
+      const plainText = content.replace(/[*#`]/g, '');
+      setScript(plainText);
+      analyzeScript(plainText);
+    } catch (err) {
+      console.error(err);
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-hidden">
 
-      {/* Sidebar */}
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        collapsed={collapsed}
-        setCollapsed={setCollapsed}
-      />
+      {/* Sidebar Removed */}
 
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-zinc-950/80 backdrop-blur-xl z-20">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-white">
-              {activeTab === 'create' ? 'Create New Project' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
-            </h2>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                <Sparkles className="text-white w-4 h-4" />
+              </div>
+              <h2 className="text-lg font-semibold text-white tracking-tight">LongCat Studio Pro</h2>
+            </div>
             <div className="h-6 w-px bg-white/10" />
 
             {/* Model Selector Inline */}
@@ -352,7 +388,7 @@ export default function App() {
                   </div>
                 )}
                 <Button variant="ghost" size="sm" icon={Copy} onClick={() => handleCopy(script)}>Copy</Button>
-                <Button variant="ghost" size="sm" icon={Download}>Save</Button>
+                <Button variant="ghost" size="sm" icon={Download} onClick={handleSave}>Save</Button>
               </div>
             </div>
 
@@ -415,10 +451,10 @@ export default function App() {
               <div className="h-16 border-t border-white/5 bg-zinc-900/10 px-6 flex items-center gap-3 backdrop-blur-sm z-10">
                 <span className="text-xs font-bold text-zinc-600 uppercase mr-2 tracking-wider">Refine:</span>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" icon={Minimize2}>Shorten</Button>
-                  <Button size="sm" variant="secondary" icon={Maximize2}>Expand</Button>
-                  <Button size="sm" variant="secondary" icon={Users}>Simplify</Button>
-                  <Button size="sm" variant="secondary" icon={Flame} className="hover:boder-orange-500/50 hover:text-orange-400">Make Viral</Button>
+                  <Button size="sm" variant="secondary" icon={Minimize2} onClick={() => handleRefine('shorten')}>Shorten</Button>
+                  <Button size="sm" variant="secondary" icon={Maximize2} onClick={() => handleRefine('expand')}>Expand</Button>
+                  <Button size="sm" variant="secondary" icon={Users} onClick={() => handleRefine('simplify')}>Simplify</Button>
+                  <Button size="sm" variant="secondary" icon={Flame} className="hover:boder-orange-500/50 hover:text-orange-400" onClick={() => handleRefine('viral')}>Make Viral</Button>
                 </div>
               </div>
             )}
